@@ -32,13 +32,23 @@ configured in one JSON file, with no PuTTY and no stored passwords.
 
 ## Install
 
-**Windows, no Python:** download `SshTree-vX.Y.Z-windows-x64.zip` from the
-[releases page](../../releases), unpack it anywhere and run `SshTree.exe`. The
-folder also contains `sshtree-cli.exe` for the command-line options.
+**Packaged, no Python needed** (from the [releases page](../../releases)):
+
+| Platform | File | Run |
+| --- | --- | --- |
+| Windows | `SshTree-vX.Y.Z-windows-x64.zip` | unpack anywhere, run `SshTree.exe`; `sshtree-cli.exe` has the command-line options |
+| Linux (x86_64, glibc 2.35+) | `SshTree-vX.Y.Z-linux-x86_64.tar.gz` | unpack, run `SshTree/SshTree`; `SshTree/sshtree-cli` for the command line |
+| macOS (Apple Silicon) | `SshTree-vX.Y.Z-macos-arm64.zip` | unpack, move `SshTree.app` where you like; the CLI is `SshTree.app/Contents/MacOS/sshtree-cli` |
+
+The macOS app is not signed or notarized. The first start is blocked by
+Gatekeeper; either right-click the app and choose *Open*, or run
+`xattr -dr com.apple.quarantine SshTree.app` once. `SHA256SUMS.txt` on the
+release lists the checksums of all packages.
 
 **From source (Windows, macOS, Linux):** clone the repository and run
 `python sshtree.py`. On Windows `SshTree.cmd` starts it without a console
-window. Nothing needs to be installed.
+window. Nothing needs to be installed; this is the natural choice on Linux
+and macOS where Python 3 with Tk is usually a package away.
 
 On first start an example config is written to
 `~/.config/sshtree/sessions.json`; edit it or add sessions through the GUI.
@@ -317,8 +327,9 @@ pyinstaller --noconfirm sshtree.spec    # dist/SshTree/ with both executables
 ```
 
 Releases are built by GitHub Actions: pushing a tag `vX.Y.Z` (matching
-`__version__` in `sshtree.py`) builds the Windows package and attaches it to a
-GitHub release. See [CHANGELOG.md](CHANGELOG.md).
+`__version__` in `sshtree.py`) builds the Windows, Linux and macOS packages
+and attaches them with checksums to a GitHub release. See
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

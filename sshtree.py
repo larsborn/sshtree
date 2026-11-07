@@ -29,7 +29,7 @@ import threading
 from pathlib import Path
 
 APP_NAME = "SSH Tree"
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 FROZEN = bool(getattr(sys, "frozen", False))  # running from a PyInstaller build
 IS_WINDOWS = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"

@@ -1,7 +1,7 @@
 name: Release
 
-# Pushing a tag such as v0.1.0 builds the Windows executables and publishes
-# them on a GitHub release together with the auto-generated notes.
+# Pushing a tag such as v0.2.2 builds the packages for Windows, Linux and
+# macOS and publishes them on one GitHub release with generated notes.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -10,8 +10,18 @@ permissions:
   contents: write
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: windows-x64
+          - os: ubuntu-latest
+            asset: linux-x86_64
+          - os: macos-latest
+            asset: macos-arm64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -26,25 +36,74 @@ jobs:
           test "$tag" = "$version"
       - name: Install build tools
         run: pip install -r requirements-dev.txt
-      - name: Smoke test
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
         run: python tests/smoke_test.py
+      - name: Smoke test (Linux, virtual display)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q xvfb
+          xvfb-run -a python tests/smoke_test.py
+      - name: Smoke test (macOS, builders only)
+        if: runner.os == 'macOS'
+        run: SSHTREE_SKIP_GUI=1 python tests/smoke_test.py
       - name: Render the icon
         run: python tools/make_icon.py
       - name: Build with PyInstaller
         run: pyinstaller --noconfirm sshtree.spec
-      - name: Check the build
+      - name: Check the build (Windows / Linux)
+        if: runner.os != 'macOS'
         shell: bash
         run: |
-          ./dist/SshTree/sshtree-cli.exe --version
-          ./dist/SshTree/sshtree-cli.exe --write-example dist/example.json
-          ./dist/SshTree/sshtree-cli.exe --config dist/example.json --list
-      - name: Package
+          cli=./dist/SshTree/sshtree-cli
+          [ "$RUNNER_OS" = "Windows" ] && cli="$cli.exe"
+          "$cli" --version
+          "$cli" --write-example dist/example.json
+          "$cli" --config dist/example.json --list
+      - name: Check the build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cli=./dist/SshTree.app/Contents/MacOS/sshtree-cli
+          "$cli" --version
+          "$cli" --write-example dist/example.json
+          "$cli" --config dist/example.json --list
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Copy-Item README.md, LICENSE, CHANGELOG.md -Destination dist/SshTree/
-          Compress-Archive -Path dist/SshTree/* -DestinationPath "SshTree-${{ github.ref_name }}-windows-x64.zip"
+          Compress-Archive -Path dist/SshTree/* -DestinationPath "SshTree-${{ github.ref_name }}-${{ matrix.asset }}.zip"
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cp README.md LICENSE CHANGELOG.md dist/SshTree/
+          tar -C dist -czf "SshTree-${{ github.ref_name }}-${{ matrix.asset }}.tar.gz" SshTree
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dist/pkg
+          cp -R dist/SshTree.app dist/pkg/
+          cp README.md LICENSE CHANGELOG.md dist/pkg/
+          ditto -c -k --keepParent dist/pkg "SshTree-${{ github.ref_name }}-${{ matrix.asset }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.asset }}
+          path: SshTree-${{ github.ref_name }}-${{ matrix.asset }}.*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd packages && sha256sum SshTree-* > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: SshTree-${{ github.ref_name }}-windows-x64.zip
+          files: packages/*
           generate_release_notes: true

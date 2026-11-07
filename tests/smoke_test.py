@@ -963,5 +963,8 @@ if __name__ == "__main__":
         tmp = Path(d)
         test_builders(tmp)
         test_importer(tmp)
-        test_gui(tmp)
+        if os.environ.get("SSHTREE_SKIP_GUI"):
+            print("info GUI test skipped (SSHTREE_SKIP_GUI set)")
+        else:
+            test_gui(tmp)
     print("ALL OK")
