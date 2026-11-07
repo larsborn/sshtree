@@ -719,6 +719,10 @@ def test_gui(tmp: Path):
                 ),
             )
             app.new_session()
+            # the new session is highlighted and the tree has the focus
+            results["new_selected"] = app.selected_path()
+            app.update()
+            results["new_focus"] = app.focus_get() is app.tree
             # Edit it: rename + move into a folder
             app.select_path(("smoke",))
             dlg_folder = "Home lab/Customers"
@@ -731,6 +735,36 @@ def test_gui(tmp: Path):
                 fill_dialog(app, {"name": "smoke2"})
 
             app.after(150, set_folder_then_ok)
+            app.edit_session()
+            results["edit_selected"] = app.selected_path()
+            # duplicate: Enter in the Name field saves, the copy is highlighted
+            app.select_path(("Home lab", "Customers", "smoke2"))
+
+            def press_enter_in_dialog():
+                dlg = [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)][
+                    -1
+                ]
+                dlg.vars["name"].set("smoke3")
+                dlg._on_return(None)  # Enter with the Name entry focused
+
+            app.after(150, press_enter_in_dialog)
+            app.duplicate_session()
+            results["dup_selected"] = app.selected_path()
+
+            # Enter inside the tunnels text box must NOT save
+            def enter_in_text_box():
+                dlg = [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)][
+                    -1
+                ]
+                from types import SimpleNamespace
+
+                event = SimpleNamespace(widget=dlg.texts["tunnels"])
+                results["enter_in_text_keeps_dialog"] = (
+                    dlg._on_return(event) is None and dlg.winfo_exists()
+                )
+                dlg.destroy()
+
+            app.after(150, enter_in_text_box)
             app.edit_session()
             # New folder at top level, move smoke2 into it by the move helper
             app.tree.selection_set(())
@@ -892,6 +926,17 @@ def test_gui(tmp: Path):
         f"hide/show window: {results['hidden_state']} -> {results['shown_state']}",
     )
     check(not (tmp / "instance.json").exists(), "instance.json removed on exit")
+    check(
+        results["new_selected"] == ("smoke",)
+        and results["new_focus"]
+        and results["edit_selected"] == ("Home lab", "Customers", "smoke2")
+        and results["dup_selected"] == ("Home lab", "Customers", "smoke3")
+        and results["enter_in_text_keeps_dialog"],
+        "dialog: Enter saves (not in text boxes), new/edited/duplicated row is "
+        f"highlighted: {results['new_selected']} {results['edit_selected']} "
+        f"{results['dup_selected']} focus={results['new_focus']} "
+        f"enter_in_text_keeps_dialog={results['enter_in_text_keeps_dialog']}",
+    )
     m = results["menus"]
     check(
         all("<DISABLED>" not in v for v in m.values()),

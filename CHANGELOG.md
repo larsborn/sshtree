@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.6] - 2026-11-07
+
+### Changed
+
+- Enter saves the session dialog (inside the tunnels and options boxes it
+  still inserts a line break; Ctrl+Enter saves from anywhere).
+- After creating, duplicating or editing a session the row is highlighted
+  and the tree has the keyboard focus.
+
 ## [0.2.5] - 2026-11-07
 
 ### Added
@@ -92,6 +101,7 @@ First release.
   Windows registry.
 - Standalone Windows build (`SshTree.exe` plus `sshtree-cli.exe`).
 
+[0.2.6]: https://github.com/larsborn/sshtree/releases/tag/v0.2.6
 [0.2.5]: https://github.com/larsborn/sshtree/releases/tag/v0.2.5
 [0.2.4]: https://github.com/larsborn/sshtree/releases/tag/v0.2.4
 [0.2.3]: https://github.com/larsborn/sshtree/releases/tag/v0.2.3

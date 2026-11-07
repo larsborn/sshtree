@@ -29,7 +29,7 @@ import threading
 from pathlib import Path
 
 APP_NAME = "SSH Tree"
-__version__ = "0.2.5"
+__version__ = "0.2.6"
 FROZEN = bool(getattr(sys, "frozen", False))  # running from a PyInstaller build
 IS_WINDOWS = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
@@ -1420,6 +1420,7 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
             ttk.Button(buttons, text="OK", command=self._ok).pack(side="right", padx=4)
             self.bind("<Escape>", lambda e: self.destroy())
             self.bind("<Control-Return>", lambda e: self._ok())
+            self.bind("<Return>", self._on_return)
             self.minsize(560, 360)
 
             self.update_idletasks()
@@ -1428,6 +1429,15 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
             self.geometry(f"+{x}+{y}")
             self.grab_set()
             self.wait_window(self)
+
+        def _on_return(self, event=None):
+            """Enter saves, except inside the multi-line boxes (tunnels,
+            options), where it inserts a line break as usual."""
+            widget = getattr(event, "widget", None) or self.focus_get()
+            if isinstance(widget, tk.Text):
+                return None
+            self._ok()
+            return "break"
 
         @staticmethod
         def _tunnel_to_line(t) -> str:
@@ -2750,6 +2760,11 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
             self.cfg.save()
             self.rebuild(open_paths=[path])
             self.select_path(path + (values["name"],))
+            self.on_select()
+            # the new/edited row is highlighted and has the focus; the second
+            # call runs after the closed dialog has handed the focus back
+            self.tree.focus_set()
+            self.after_idle(self.tree.focus_set)
             return True
 
         def new_session(self):
