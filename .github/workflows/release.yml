@@ -1,0 +1,50 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the Windows executables and publishes
+# them on a GitHub release together with the auto-generated notes.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Check that the tag matches __version__
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(python -c 'import sshtree; print(sshtree.__version__)')"
+          echo "tag=$tag version=$version"
+          test "$tag" = "$version"
+      - name: Install build tools
+        run: pip install -r requirements-dev.txt
+      - name: Smoke test
+        run: python tests/smoke_test.py
+      - name: Render the icon
+        run: python tools/make_icon.py
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm sshtree.spec
+      - name: Check the build
+        shell: bash
+        run: |
+          ./dist/SshTree/sshtree-cli.exe --version
+          ./dist/SshTree/sshtree-cli.exe --write-example dist/example.json
+          ./dist/SshTree/sshtree-cli.exe --config dist/example.json --list
+      - name: Package
+        shell: pwsh
+        run: |
+          Copy-Item README.md, LICENSE, CHANGELOG.md -Destination dist/SshTree/
+          Compress-Archive -Path dist/SshTree/* -DestinationPath "SshTree-${{ github.ref_name }}-windows-x64.zip"
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SshTree-${{ github.ref_name }}-windows-x64.zip
+          generate_release_notes: true

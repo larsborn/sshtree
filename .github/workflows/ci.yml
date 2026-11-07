@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install dev tools
+        run: pip install black isort
+      - name: Formatting
+        run: |
+          black --check sshtree.py import_putty_registry.py tests tools docs
+          isort --check-only sshtree.py import_putty_registry.py tests tools docs
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: python tests/smoke_test.py
+      - name: Smoke test (Linux, virtual display)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q xvfb
+          xvfb-run -a python tests/smoke_test.py

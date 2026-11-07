@@ -1,0 +1,77 @@
+{
+  "defaults": {
+    "user": "alice",
+    "identity_file": "~/.ssh/id_ed25519",
+    "options": {"ServerAliveInterval": 30},
+    "agent_forwarding": true,
+    "hold_on_exit": "error",
+    "terminal": "auto",
+    "ssh_path": "ssh",
+    "close_action": "exit"
+  },
+  "tree": [
+    {
+      "name": "Homelab",
+      "defaults": {"identity_file": "~/.ssh/homelab"},
+      "children": [
+        {
+          "name": "Proxmox",
+          "defaults": {"user": "root"},
+          "children": [
+            {"name": "pve1", "host": "10.0.10.11"},
+            {"name": "pve2", "host": "10.0.10.12"},
+            {"name": "backup", "host": "10.0.10.20", "port": 2222}
+          ]
+        },
+        {"name": "nas", "host": "nas.lan"},
+        {"name": "pihole", "host": "pihole.lan"},
+        {"name": "media", "host": "media.lan", "user": "jellyfin"},
+        {"name": "home-assistant", "host": "homeassistant.lan", "user": "hassio"},
+        {
+          "name": "proxmox web ui",
+          "host": "10.0.10.11",
+          "user": "root",
+          "no_shell": true,
+          "tunnels": ["L 8006 127.0.0.1:8006"]
+        }
+      ]
+    },
+    {
+      "name": "Clients",
+      "children": [
+        {
+          "name": "Acme Corp",
+          "defaults": {"jump_host": "alice@bastion.acme.example"},
+          "children": [
+            {"name": "acme-web-01", "host": "10.20.0.11", "user": "deploy"},
+            {"name": "acme-web-02", "host": "10.20.0.12", "user": "deploy"},
+            {
+              "name": "acme-db (tunnel)",
+              "host": "10.20.0.30",
+              "no_shell": true,
+              "tunnels": ["L 5432 127.0.0.1:5432"]
+            }
+          ]
+        },
+        {
+          "name": "Globex",
+          "children": [
+            {"name": "globex-app", "host": "app.globex.example", "user": "ubuntu"},
+            {"name": "globex-staging", "host": "staging.globex.example", "user": "ubuntu"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cloud",
+      "children": [
+        {"name": "web-eu-1", "host": "203.0.113.10", "user": "root"},
+        {"name": "web-eu-2", "host": "203.0.113.11", "user": "root"},
+        {"name": "db-primary", "host": "203.0.113.20", "user": "postgres", "tunnels": ["L 5433 localhost:5432"]},
+        {"name": "socks via vpn-gw", "host": "vpn-gw.example.net", "no_shell": true, "tunnels": ["D 1080"]}
+      ]
+    },
+    {"name": "raspberry pi", "host": "raspberrypi.local", "user": "pi"},
+    {"name": "old-server (legacy rsa)", "host": "legacy.example.org", "identity_file": "~/.ssh/id_rsa_legacy"}
+  ]
+}

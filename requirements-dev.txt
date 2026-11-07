@@ -1,0 +1,6 @@
+# Only needed to develop, test and package SshTree. The program itself has no
+# dependencies beyond the Python standard library.
+black
+isort
+pillow
+pyinstaller

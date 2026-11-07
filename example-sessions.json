@@ -1,0 +1,72 @@
+{
+  "defaults": {
+    "user": "root",
+    "port": 22,
+    "identity_file": "~/.ssh/id_ed25519",
+    "options": {
+      "ServerAliveInterval": 30
+    },
+    "hold_on_exit": "error",
+    "terminal": "auto",
+    "terminal_path": "auto",
+    "ssh_path": "auto",
+    "winscp_path": "auto",
+    "winscp_protocol": "sftp",
+    "close_action": "exit"
+  },
+  "tree": [
+    {
+      "name": "example-host",
+      "host": "192.0.2.10",
+      "user": "admin"
+    },
+    {
+      "name": "Home lab",
+      "defaults": {
+        "user": "alice",
+        "identity_file": "~/.ssh/homelab"
+      },
+      "children": [
+        {
+          "name": "nas",
+          "host": "nas.lan"
+        },
+        {
+          "name": "proxmox",
+          "host": "pve.lan",
+          "user": "root",
+          "port": 2222
+        },
+        {
+          "name": "db tunnel",
+          "host": "bastion.lan",
+          "no_shell": true,
+          "tunnels": [
+            {
+              "type": "local",
+              "listen": "5432",
+              "target": "db.internal:5432"
+            },
+            "L 127.0.0.1:8080 web.internal:80",
+            "D 1080"
+          ]
+        },
+        {
+          "name": "Customers",
+          "children": [
+            {
+              "name": "acme-prod",
+              "host": "10.0.0.5",
+              "jump_host": "alice@gw.acme.example",
+              "options": {
+                "StrictHostKeyChecking": "accept-new"
+              },
+              "agent_forwarding": true,
+              "command": "sudo -i"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
