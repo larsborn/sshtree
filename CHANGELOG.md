@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-11-07
+
+### Changed
+
+- About is a proper dialog: icon, version, licence and repository link, and
+  the machine facts (config, state, SSH, terminal, file transfer, Python,
+  platform) in a table of copyable fields instead of a wrapped message box.
+  Buttons to copy the details and to open the config folder.
+
 ## [0.2.0] - 2026-11-07
 
 ### Changed
@@ -51,5 +60,6 @@ First release.
   Windows registry.
 - Standalone Windows build (`SshTree.exe` plus `sshtree-cli.exe`).
 
+[0.2.1]: https://github.com/larsborn/sshtree/releases/tag/v0.2.1
 [0.2.0]: https://github.com/larsborn/sshtree/releases/tag/v0.2.0
 [0.1.0]: https://github.com/larsborn/sshtree/releases/tag/v0.1.0

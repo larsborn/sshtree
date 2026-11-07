@@ -29,7 +29,7 @@ import threading
 from pathlib import Path
 
 APP_NAME = "SSH Tree"
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 FROZEN = bool(getattr(sys, "frozen", False))  # running from a PyInstaller build
 IS_WINDOWS = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
@@ -1683,6 +1683,83 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
         parent.wait_window(dlg)
         return picked[0] if picked else None
 
+    class AboutDialog(tk.Toplevel):
+        """Name, version, links, and a neat table of the machine facts."""
+
+        URL = "https://github.com/larsborn/sshtree"
+
+        def __init__(self, parent, rows: list[tuple[str, str]], icon):
+            super().__init__(parent)
+            self.title(f"About {APP_NAME}")
+            self.resizable(False, False)
+            self.transient(parent)
+            outer = ttk.Frame(self, padding=(16, 14, 16, 12))
+            outer.pack(fill="both", expand=True)
+
+            head = ttk.Frame(outer)
+            head.pack(fill="x")
+            ttk.Label(head, image=icon).pack(side="left", padx=(0, 12))
+            titles = ttk.Frame(head)
+            titles.pack(side="left", fill="x", expand=True)
+            from tkinter import font as tkfont
+
+            big = tkfont.nametofont("TkDefaultFont").copy()
+            big.configure(size=big.cget("size") + 5, weight="bold")
+            ttk.Label(titles, text=APP_NAME, font=big).pack(anchor="w")
+            ttk.Label(titles, text=f"Version {__version__}  ·  MIT License").pack(
+                anchor="w"
+            )
+            link = ttk.Label(
+                titles, text=self.URL, foreground="#1a5fb4", cursor="hand2"
+            )
+            link.pack(anchor="w", pady=(2, 0))
+            link.bind("<Button-1>", lambda e: open_with_default_app(self.URL))
+            ttk.Label(
+                outer,
+                text="A folder tree of SSH sessions. Any terminal. No stored passwords.",
+            ).pack(anchor="w", pady=(10, 8))
+
+            ttk.Separator(outer).pack(fill="x", pady=(0, 8))
+            grid = ttk.Frame(outer)
+            grid.pack(fill="x")
+            grid.columnconfigure(1, weight=1)
+            self.details = rows
+            for r, (label, value) in enumerate(rows):
+                ttk.Label(grid, text=label, foreground="#555555").grid(
+                    row=r, column=0, sticky="nw", padx=(0, 14), pady=1
+                )
+                # read-only entries: long paths stay on one line and can be copied
+                ent = ttk.Entry(grid, width=64)
+                ent.insert(0, value)
+                ent.configure(state="readonly")
+                ent.grid(row=r, column=1, sticky="ew", pady=1)
+
+            buttons = ttk.Frame(outer)
+            buttons.pack(fill="x", pady=(12, 0))
+            ttk.Button(buttons, text="Copy details", command=self._copy).pack(
+                side="left"
+            )
+            ttk.Button(
+                buttons,
+                text="Open config folder",
+                command=lambda: open_with_default_app(Path(rows[0][1]).parent),
+            ).pack(side="left", padx=(6, 0))
+            ok = ttk.Button(buttons, text="OK", command=self.destroy)
+            ok.pack(side="right")
+            ok.focus_set()
+            self.bind("<Escape>", lambda e: self.destroy())
+            self.bind("<Return>", lambda e: self.destroy())
+            self.update_idletasks()
+            self.geometry(f"+{parent.winfo_rootx() + 30}+{parent.winfo_rooty() + 60}")
+            self.grab_set()
+
+        def _copy(self):
+            text = f"{APP_NAME} {__version__}\n" + "\n".join(
+                f"{k}: {v}" for k, v in self.details
+            )
+            self.clipboard_clear()
+            self.clipboard_append(text)
+
     class App(tk.Tk):
         ROOT_LABEL = "(top level)"
 
@@ -1700,6 +1777,7 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
                 "folder_open": pixmap(FOLDER_OPEN_PX, PALETTE),
                 "session": pixmap(SESSION_PX, PALETTE),
                 "tunnel": pixmap(SESSION_PX, {**PALETTE, "g": PALETTE["t"]}),
+                "session_big": pixmap(SESSION_PX, PALETTE, pad=0).zoom(3, 3),
             }
             self.iconphoto(True, self.icons["session"])
 
@@ -2862,16 +2940,20 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
                 "filezilla": lambda: find_filezilla(d.get("filezilla_path")),
             }
             found = finders[transfer]() if transfer in finders else transfer
-            winscp = f"{transfer}: {found or 'not found'}"
-            messagebox.showinfo(
-                APP_NAME,
-                f"{APP_NAME} {__version__}\n\nConfig: {self.cfg.path}\nState: {self.state_path}\n"
-                f"SSH: {ssh_info}\nTerminal: {terminal}\nFile transfer: {winscp}\n"
-                f"Close button: {self.close_action}\n"
-                f"Python: {sys.executable}\n\n"
-                "Right-click for the session menu. Drag sessions between folders.",
-                parent=self,
-            )
+            if transfer == "none":
+                transfer_info = "none"
+            else:
+                transfer_info = f"{transfer} ({found or 'not found'})"
+            rows = [
+                ("Config", str(self.cfg.path)),
+                ("State", str(self.state_path)),
+                ("SSH", ssh_info),
+                ("Terminal", terminal),
+                ("File transfer", transfer_info),
+                ("Python", f"{platform.python_version()}  {sys.executable}"),
+                ("Platform", platform.platform()),
+            ]
+            AboutDialog(self, rows, self.icons["session_big"])
 
     app = App(cfg)
     if start_hidden:
