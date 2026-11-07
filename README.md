@@ -1,13 +1,21 @@
 # SshTree
 
+**A folder tree of SSH sessions. Any terminal. No stored passwords.**
+
+[![Release](https://img.shields.io/github/v/release/larsborn/sshtree?label=release)](../../releases/latest)
+[![CI](https://github.com/larsborn/sshtree/actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.9+, stdlib only](https://img.shields.io/badge/python-3.9%2B%20%C2%B7%20stdlib%20only-3776ab)
+
 A small, fast session launcher for OpenSSH in the spirit of *PuTTY Session
 Manager*: a folder tree of SSH sessions that opens in your terminal of choice,
 configured in one JSON file, with no PuTTY and no stored passwords.
 
 <p align="center">
-  <img src="docs/screenshots/main.png" alt="SshTree main window" width="380">
-  <img src="docs/screenshots/filter.png" alt="Filtering the tree" width="380">
+  <img src="docs/hero.gif" alt="SshTree: select a session, type to filter, Enter to launch" width="380">
 </p>
+
+<p align="center"><sub>Pick a session, start typing to filter, Enter opens it in your terminal.</sub></p>
 
 * Single file, Python 3.9+ standard library only. Also available as a
   standalone Windows build (no Python needed).
@@ -36,6 +44,11 @@ On first start an example config is written to
 `~/.config/sshtree/sessions.json`; edit it or add sessions through the GUI.
 
 ## Using the GUI
+
+<p align="center">
+  <img src="docs/screenshots/main.png" alt="SshTree main window" width="380">
+  <img src="docs/screenshots/filter.png" alt="Filtering the tree" width="380">
+</p>
 
 Right-click gives the session menu: New Session, Launch Session, Launch Folder
 (and Subfolders), Launch WinSCP, Refresh, Expand and Collapse, Sort By, Lock
