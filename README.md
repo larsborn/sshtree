@@ -169,7 +169,7 @@ example.
 | `hold_on_exit` | `error` (default), `always` or `never`. `error` keeps the terminal open only when ssh itself fails (exit code 255: connection, host key, authentication), never after a plain `exit` or Ctrl+C. |
 | `terminal` | `auto`, a preset name, or a custom template list (below). |
 | `terminal_path` | `auto` or the terminal executable to use for the preset, e.g. a portable `WindowsTerminal.exe`. |
-| `ssh_path` | The ssh executable. `auto` (default) uses the built-in Windows OpenSSH when present; `ssh` takes whatever is first on the PATH; or a full path. |
+| `ssh_path` | The ssh executable. `auto` (default, `ssh` means the same) uses the built-in Windows OpenSSH when present, which can use a Windows agent such as Pageant; `path` takes whatever ssh is first on the PATH (often Git's, which cannot); or a full path. |
 | `ssh_app` | `openssh` (default): ssh inside the terminal. `putty`: PuTTY in its own window with the same user, port, key (`.ppk` preferred), tunnels, `-A`, `-X`, `-N`; a `jump_host` becomes a plink proxy command; `options` and `command` do not apply. |
 | `putty_path` | `auto` or the path to `putty.exe`. |
 | `scp_app` | File transfer application for "Open in ...": `winscp` (default on Windows), `filezilla`, `custom` or `none`. |

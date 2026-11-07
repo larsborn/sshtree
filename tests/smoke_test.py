@@ -107,6 +107,11 @@ def test_builders(tmp: Path):
             ssh_exe.lower().endswith(r"system32\openssh\ssh.exe"),
             f"auto ssh_path prefers Windows OpenSSH: {ssh_exe}",
         )
+        check(
+            sshtree.resolve_ssh_path("ssh") == ssh_exe,
+            "ssh_path 'ssh' (0.1 example value) means auto",
+        )
+    check(sshtree.resolve_ssh_path("path") == "ssh", "ssh_path 'path' is the PATH ssh")
     cmd = sshtree.build_ssh_command(
         {"host": "h", "identity_file": ["~/.ssh/a", "", "~/.ssh/b"]}
     )

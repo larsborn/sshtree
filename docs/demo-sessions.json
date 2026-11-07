@@ -6,7 +6,7 @@
     "agent_forwarding": true,
     "hold_on_exit": "error",
     "terminal": "auto",
-    "ssh_path": "ssh",
+    "ssh_path": "path",
     "close_action": "exit"
   },
   "tree": [

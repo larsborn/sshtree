@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.4] - 2026-11-07
+
+### Fixed
+
+- `ssh_path: "ssh"`, the value the 0.1 example config wrote, means `auto`
+  again (prefer the built-in Windows OpenSSH, which can use Pageant). 0.2.1
+  had turned it into "the ssh on the PATH", which on machines with Git for
+  Windows silently switched sessions to Git's ssh and broke agent
+  authentication. Use the new value `path` for the PATH ssh on purpose.
+
 ## [0.2.3] - 2026-11-07
 
 ### Changed
@@ -75,6 +85,7 @@ First release.
   Windows registry.
 - Standalone Windows build (`SshTree.exe` plus `sshtree-cli.exe`).
 
+[0.2.4]: https://github.com/larsborn/sshtree/releases/tag/v0.2.4
 [0.2.3]: https://github.com/larsborn/sshtree/releases/tag/v0.2.3
 [0.2.2]: https://github.com/larsborn/sshtree/releases/tag/v0.2.2
 [0.2.1]: https://github.com/larsborn/sshtree/releases/tag/v0.2.1

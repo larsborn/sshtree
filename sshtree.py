@@ -29,7 +29,7 @@ import threading
 from pathlib import Path
 
 APP_NAME = "SSH Tree"
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 FROZEN = bool(getattr(sys, "frozen", False))  # running from a PyInstaller build
 IS_WINDOWS = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
@@ -342,9 +342,9 @@ def resolve_ssh_path(configured) -> str:
     the built-in OpenSSH over Git's MSYS ssh, which is usually first on the
     PATH but cannot talk to a Windows named-pipe agent such as Pageant."""
     value = str(configured or "auto").strip()
-    if value.lower() == "ssh":
+    if value.lower() == "path":
         return "ssh"  # explicitly: whatever ssh is first on the PATH
-    if value.lower() != "auto":
+    if value.lower() not in ("auto", "ssh"):  # "ssh" was the 0.1 example value
         return expand_path(value)
     if IS_WINDOWS:
         native = os.path.expandvars(WINDOWS_OPENSSH)
