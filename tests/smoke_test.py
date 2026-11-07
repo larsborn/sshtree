@@ -721,6 +721,9 @@ def test_gui(tmp: Path):
             app.new_session()
             # the new session is highlighted and the tree has the focus
             results["new_selected"] = app.selected_path()
+            # on a bare X server nothing hands the focus back to the window
+            # after the modal dialog closes (a window manager does); mimic that
+            app.focus_force()
             app.update()
             results["new_focus"] = app.focus_get() is app.tree
             # Edit it: rename + move into a folder
