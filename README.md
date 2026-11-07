@@ -91,7 +91,7 @@ re-read automatically when it changes on disk.
 | F5 | Reload config |
 | Home / End | First / last visible row |
 | Ctrl+Right / Ctrl+Left | Expand / collapse all |
-| Ctrl+F, or just typing | Open the filter bar |
+| Ctrl+F, or just typing | Open the filter bar (Ctrl+F selects an existing filter, so typing replaces it) |
 | Enter or Down in the filter | Select the first match; Enter again launches it |
 | Esc | Clear the filter, then hide the bar, then close the window |
 | Ctrl+Q | Exit |

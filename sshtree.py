@@ -29,7 +29,7 @@ import threading
 from pathlib import Path
 
 APP_NAME = "SSH Tree"
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 FROZEN = bool(getattr(sys, "frozen", False))  # running from a PyInstaller build
 IS_WINDOWS = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
@@ -2221,8 +2221,13 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
                 self.filter_bar.pack(fill="x", before=self.tree_frame)
             if initial:
                 self.filter_var.set(initial)
+                self.filter_entry.selection_clear()
+                self.filter_entry.icursor("end")
+            else:
+                # Ctrl+F on an existing filter: select it, so typing replaces it
+                self.filter_entry.selection_range(0, "end")
+                self.filter_entry.icursor("end")
             self.filter_entry.focus_set()
-            self.filter_entry.icursor("end")
             return "break"
 
         def hide_filter(self):

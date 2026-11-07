@@ -636,6 +636,10 @@ def test_gui(tmp: Path):
             # focus by itself, and the focus checks below depend on it
             app.focus_force()
             app.update()
+            # the test drives the widgets directly; keystrokes or clicks from a
+            # person at the machine must not reach them meanwhile
+            for w in (app, app.tree, app.filter_entry):
+                w.bindtags((str(w),))
             names = [app.tree.item(i, "text") for i in app.tree.get_children("")]
             results["top"] = names
             app.set_all_open(True)
@@ -668,6 +672,14 @@ def test_gui(tmp: Path):
             app.show_filter("abc")
             app.update()
             results["bar_shown"] = bool(app.filter_bar.winfo_manager())
+            # Ctrl+F on an existing filter selects the whole text
+            results["typed_not_selected"] = not app.filter_entry.selection_present()
+            app.show_filter()
+            app.update()
+            results["ctrlf_selected"] = (
+                app.filter_entry.selection_present()
+                and app.filter_entry.selection_get() == "abc"
+            )
             app.on_escape()
             results["esc_cleared"] = app.filter_var.get()
             results["bar_after_clear"] = bool(app.filter_bar.winfo_manager())
@@ -858,8 +870,11 @@ def test_gui(tmp: Path):
         and results["esc_cleared"] == ""
         and results["bar_after_clear"]
         and not results["bar_after_second_esc"]
-        and results["esc_state"] == "withdrawn",
+        and results["esc_state"] == "withdrawn"
+        and results["ctrlf_selected"]
+        and results["typed_not_selected"],
         "filter bar hidden by default; Escape clears, hides the bar, then the window: "
+        f"ctrlf_selects={results['ctrlf_selected']} typed_unselected={results['typed_not_selected']} "
         f"{ {k: v for k, v in results.items() if k.startswith(('bar', 'esc'))} }",
     )
     check(
