@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-11-07
+
+### Changed
+
+- Context menus depend on what was clicked: a session, a folder or empty
+  space each get their own menu with only the entries that apply, so nothing
+  is greyed out any more. The "Session Management" submenu is gone; folder
+  operations live on folders and empty space, application items (refresh,
+  sort, lock, settings, config file, about, exit) are flat on empty space and
+  in an "SSH Tree" submenu elsewhere.
+- "Launch WinSCP" became "Open in WinSCP / FileZilla / Open File Transfer",
+  depending on the configured application.
+
+### Added
+
+- Settings dialog for the machine-specific defaults: SSH application, ssh and
+  putty executables, terminal, hold mode, file transfer application and
+  executables, close button behaviour, tree font.
+- Choice of SSH application: OpenSSH in a terminal (default) or PuTTY
+  (`ssh_app`, per session or globally). PuTTY gets the same user, port, key
+  (`.ppk` preferred), tunnels, agent and X11 forwarding, `-N` and jump host
+  (via plink).
+- Choice of file transfer application: WinSCP, FileZilla, a custom command
+  template with placeholders, or none (`scp_app`, `scp_command`,
+  `filezilla_path`).
+- Import PuTTY sessions from the GUI (Windows): add missing sessions or
+  replace the tree, with a backup of the config file.
+
 ## [0.1.0] - 2026-11-07
 
 First release.
@@ -23,4 +51,5 @@ First release.
   Windows registry.
 - Standalone Windows build (`SshTree.exe` plus `sshtree-cli.exe`).
 
+[0.2.0]: https://github.com/larsborn/sshtree/releases/tag/v0.2.0
 [0.1.0]: https://github.com/larsborn/sshtree/releases/tag/v0.1.0

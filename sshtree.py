@@ -29,7 +29,7 @@ import threading
 from pathlib import Path
 
 APP_NAME = "SSH Tree"
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 FROZEN = bool(getattr(sys, "frozen", False))  # running from a PyInstaller build
 IS_WINDOWS = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
@@ -50,6 +50,8 @@ EXAMPLE_CONFIG = {
         "ssh_path": "auto",
         "winscp_path": "auto",
         "winscp_protocol": "sftp",
+        "ssh_app": "openssh",
+        "scp_app": "winscp",
         "close_action": "exit",
     },
     "tree": [
@@ -538,6 +540,172 @@ def build_winscp_command(s: dict) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# Which application opens a session (OpenSSH in a terminal, or PuTTY) and
+# which one does file transfer (WinSCP, FileZilla, a custom command)
+# --------------------------------------------------------------------------
+
+SSH_APPS = ("openssh", "putty")
+TRANSFER_APPS = ("winscp", "filezilla", "custom", "none")
+TRANSFER_LABELS = {
+    "winscp": "Open in WinSCP",
+    "filezilla": "Open in FileZilla",
+    "custom": "Open File Transfer",
+}
+
+
+def find_program(configured, names: list[str], candidates: list[str]) -> str | None:
+    """An explicit path (if it exists), else the first of `names` on the PATH,
+    else the first existing path in `candidates` (with %VARS% expanded)."""
+    if configured and str(configured).lower() != "auto":
+        p = expand_path(configured)
+        return p if os.path.exists(p) else None
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            return found
+    for cand in candidates:
+        path = os.path.expandvars(cand)
+        if "%" not in path and os.path.isfile(path):
+            return path
+    return None
+
+
+def find_putty(configured) -> str | None:
+    return find_program(
+        configured,
+        ["putty"],
+        [
+            r"%ProgramFiles%\PuTTY\putty.exe",
+            r"%ProgramFiles(x86)%\PuTTY\putty.exe",
+            r"%LOCALAPPDATA%\Programs\PuTTY\putty.exe",
+            r"%ProgramData%\chocolatey\bin\putty.exe",
+        ],
+    )
+
+
+def find_filezilla(configured) -> str | None:
+    return find_program(
+        configured,
+        ["filezilla"],
+        [
+            r"%ProgramFiles%\FileZilla FTP Client\filezilla.exe",
+            r"%ProgramFiles(x86)%\FileZilla FTP Client\filezilla.exe",
+            "/Applications/FileZilla.app/Contents/MacOS/filezilla",
+        ],
+    )
+
+
+def ssh_app_of(s: dict) -> str:
+    app = str(s.get("ssh_app") or "openssh").strip().lower()
+    return app if app in SSH_APPS else "openssh"
+
+
+def transfer_app_of(s: dict) -> str:
+    app = (
+        str(s.get("scp_app") or ("winscp" if IS_WINDOWS else "filezilla"))
+        .strip()
+        .lower()
+    )
+    return app if app in TRANSFER_APPS else "winscp"
+
+
+def build_putty_command(s: dict) -> list[str]:
+    """PuTTY instead of OpenSSH: same session settings, PuTTY's switches.
+    `options` and `command` have no PuTTY equivalent and are ignored."""
+    exe = find_putty(s.get("putty_path"))
+    if not exe:
+        raise FileNotFoundError("putty.exe not found - set putty_path in Settings")
+    host = str(s.get("host") or "").strip()
+    if not host:
+        raise ValueError(f"session {s.get('name', '?')!r} has no host")
+    args = [exe, "-ssh"]
+    if s.get("user"):
+        args += ["-l", str(s["user"])]
+    port = s.get("port")
+    if port not in (None, "", 22, "22"):
+        args += ["-P", str(port)]
+    key = winscp_key_for(s)  # prefers a .ppk next to the OpenSSH key
+    if key:
+        args += ["-i", key]
+    if truthy(s.get("agent_forwarding")):
+        args.append("-A")
+    if truthy(s.get("x11")):
+        args.append("-X")
+    if truthy(s.get("no_shell")):
+        args.append("-N")
+    for spec in s.get("tunnels") or []:
+        args += list(parse_tunnel(spec))  # -L/-R/-D take the same syntax
+    jump = s.get("jump_host")
+    if jump:
+        args += ["-proxycmd", f"plink -batch -nc %host:%port {jump}"]
+    extra = s.get("extra_args") or []
+    if isinstance(extra, str):
+        extra = shlex.split(extra)
+    args += [str(a) for a in extra]
+    args.append(host)
+    return args
+
+
+def build_session_command(s: dict) -> list[str]:
+    """The command that opens the session, for the chosen SSH application."""
+    if ssh_app_of(s) == "putty":
+        return build_putty_command(s)
+    return build_ssh_command(s)
+
+
+def build_filezilla_command(s: dict) -> list[str]:
+    exe = find_filezilla(s.get("filezilla_path"))
+    if not exe:
+        raise FileNotFoundError("filezilla not found - set filezilla_path in Settings")
+    host = str(s.get("host") or "").strip()
+    if not host:
+        raise ValueError(f"session {s.get('name', '?')!r} has no host")
+    user = s.get("user")
+    port = s.get("port") or 22
+    return [exe, f"sftp://{user + '@' if user else ''}{host}:{port}"]
+
+
+def build_custom_transfer_command(s: dict) -> list[str]:
+    """`scp_command`: a list (or string) with {host} {user} {port} {key} {url}
+    {userhost} placeholders, e.g. ["C:/Tools/MyScp.exe", "{url}"]."""
+    template = s.get("scp_command") or []
+    if isinstance(template, str):
+        template = shlex.split(template)
+    if not template:
+        raise ValueError("scp_app is 'custom' but scp_command is not set")
+    host = str(s.get("host") or "").strip()
+    user = str(s.get("user") or "")
+    port = str(s.get("port") or 22)
+    keys = identity_files(s)
+    values = {
+        "host": host,
+        "user": user,
+        "port": port,
+        "key": keys[0] if keys else "",
+        "userhost": f"{user}@{host}" if user else host,
+        "url": f"sftp://{user + '@' if user else ''}{host}:{port}/",
+    }
+    out = []
+    for element in template:
+        text = str(element)
+        for name, value in values.items():
+            text = text.replace("{" + name + "}", value)
+        out.append(text)
+    return out
+
+
+def build_file_transfer_command(s: dict) -> list[str]:
+    app = transfer_app_of(s)
+    if app == "winscp":
+        return build_winscp_command(s)
+    if app == "filezilla":
+        return build_filezilla_command(s)
+    if app == "custom":
+        return build_custom_transfer_command(s)
+    raise ValueError("no file transfer application configured (scp_app)")
+
+
+# --------------------------------------------------------------------------
 # Terminal launching
 # --------------------------------------------------------------------------
 
@@ -696,18 +864,25 @@ def spawn(argv: list[str], new_console: bool = False) -> None:
 
 
 def launch_session(s: dict) -> list[str]:
+    if ssh_app_of(s) == "putty":
+        argv = build_putty_command(s)  # PuTTY brings its own window
+        spawn(argv)
+        return argv
     cmd = build_ssh_command(s)
     argv, preset = terminal_command(s, cmd)
     spawn(argv, new_console=(preset == "console"))
     return argv
 
 
-def launch_winscp(s: dict) -> list[str]:
-    if not IS_WINDOWS:
-        raise RuntimeError("WinSCP is only available on Windows")
-    argv = build_winscp_command(s)
+def launch_file_transfer(s: dict) -> list[str]:
+    argv = build_file_transfer_command(s)
     spawn(argv)
     return argv
+
+
+def launch_winscp(s: dict) -> list[str]:
+    """Kept for callers of the 0.1 API; the app is chosen by `scp_app` now."""
+    return launch_file_transfer(s)
 
 
 # --------------------------------------------------------------------------
@@ -931,6 +1106,22 @@ def foreground_from_launcher(hwnd: int, seconds: float = 1.5) -> bool:
 # --------------------------------------------------------------------------
 
 
+def apply_settings(defaults: dict, values: dict) -> list[str]:
+    """Write Settings dialog values into the defaults dict; empty means
+    'remove the key'.  Returns the keys that changed."""
+    changed = []
+    for key, value in values.items():
+        old = defaults.get(key)
+        if value == "":
+            if key in defaults:
+                del defaults[key]
+                changed.append(key)
+        elif str(old) != value:
+            defaults[key] = value
+            changed.append(key)
+    return changed
+
+
 def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
     """Start the Tk application.  `on_ready(app)` is called once the window
     is built (used by the smoke test to drive the GUI).  With `start_hidden`
@@ -1023,7 +1214,7 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
         """Create / edit one session.  Empty fields mean 'inherit'."""
 
         # (key, label, kind, tab[, combo values]); empty fields mean "inherit"
-        TABS = ["Session", "Tunnels", "SSH", "Terminal", "WinSCP"]
+        TABS = ["Session", "Tunnels", "SSH", "Terminal", "File transfer"]
         TAB_HELP = {
             "Tunnels": (
                 "Port forwardings through this SSH connection, one per line. "
@@ -1052,10 +1243,11 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
                 "'never' do what they say. Preset and executable choose the terminal "
                 "program; leave them empty to use the global default."
             ),
-            "WinSCP": (
-                "Used by 'Launch WinSCP'. The key must be a PuTTY .ppk file; when "
-                "empty, a .ppk next to the identity file is used, otherwise WinSCP "
-                "falls back to Pageant."
+            "File transfer": (
+                "Used by 'Open in WinSCP / FileZilla'. The application itself is "
+                "chosen in Settings (or per session here). WinSCP wants a PuTTY .ppk "
+                "key; when empty, a .ppk next to the identity file is used, otherwise "
+                "WinSCP falls back to Pageant."
             ),
         }
         FIELDS = [
@@ -1066,6 +1258,7 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
             ("identity_file", "Identity file", "file", "Session"),
             ("tunnels", "Tunnels, one per line", "text", "Tunnels"),
             ("no_shell", "No shell, tunnels only (-N)", "bool", "Tunnels"),
+            ("ssh_app", "SSH application", "combo", "SSH", ["", *SSH_APPS]),
             ("jump_host", "Jump host (-J user@host)", "entry", "SSH"),
             ("command", "Remote command", "entry", "SSH"),
             ("extra_args", "Extra ssh arguments", "entry", "SSH"),
@@ -1091,10 +1284,17 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
                 "winscp_protocol",
                 "WinSCP protocol",
                 "combo",
-                "WinSCP",
+                "File transfer",
                 ["", "sftp", "scp"],
             ),
-            ("winscp_key", "WinSCP key (.ppk)", "file", "WinSCP"),
+            ("winscp_key", "WinSCP key (.ppk)", "file", "File transfer"),
+            (
+                "scp_app",
+                "File transfer application",
+                "combo",
+                "File transfer",
+                ["", *TRANSFER_APPS],
+            ),
         ]
 
         def __init__(self, parent, title, node, folder_paths, current_folder):
@@ -1315,6 +1515,173 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
                 return
             self.result = (self.folder_var.get(), result)
             self.destroy()
+
+    class SettingsDialog(tk.Toplevel):
+        """Global defaults that are about *this machine*: which programs open
+        sessions and transfers, the terminal, and a few conveniences.  Empty
+        means 'not set' (the built-in default applies)."""
+
+        TABS = ["SSH", "Terminal", "File transfer", "General"]
+        TAB_HELP = {
+            "SSH": (
+                "OpenSSH runs inside the terminal chosen on the Terminal tab; "
+                "PuTTY opens its own window. 'auto' finds the programs itself: "
+                "the Windows OpenSSH in System32, putty.exe in Program Files or "
+                "on the PATH."
+            ),
+            "File transfer": (
+                "The program behind 'Open in ...' on a session. 'custom' runs the "
+                "command below with {host} {user} {port} {key} {url} {userhost} "
+                "filled in, e.g.  C:/Tools/MyScp.exe {url}"
+            ),
+        }
+        FIELDS = [
+            ("ssh_app", "SSH application", "combo", "SSH", ["", *SSH_APPS]),
+            ("ssh_path", "ssh executable (auto)", "file", "SSH"),
+            ("putty_path", "putty executable (auto)", "file", "SSH"),
+            ("user", "Default login user", "entry", "SSH"),
+            ("identity_file", "Default identity file", "file", "SSH"),
+            (
+                "terminal",
+                "Terminal preset",
+                "combo",
+                "Terminal",
+                ["", "auto"] + sorted(TERMINAL_PRESETS),
+            ),
+            ("terminal_path", "Terminal executable (auto)", "file", "Terminal"),
+            (
+                "hold_on_exit",
+                "Hold terminal on exit",
+                "combo",
+                "Terminal",
+                ["", "never", "error", "always"],
+            ),
+            (
+                "scp_app",
+                "File transfer application",
+                "combo",
+                "File transfer",
+                ["", *TRANSFER_APPS],
+            ),
+            ("winscp_path", "WinSCP executable (auto)", "file", "File transfer"),
+            ("filezilla_path", "FileZilla executable (auto)", "file", "File transfer"),
+            ("scp_command", "Custom command", "entry", "File transfer"),
+            (
+                "winscp_protocol",
+                "WinSCP protocol",
+                "combo",
+                "File transfer",
+                ["", "sftp", "scp"],
+            ),
+            (
+                "close_action",
+                "Close button",
+                "combo",
+                "General",
+                ["", "exit", "hide"],
+            ),
+            ("font", "Tree font (e.g. Segoe UI 9)", "entry", "General"),
+        ]
+
+        def __init__(self, parent, defaults: dict):
+            super().__init__(parent)
+            self.title("Settings")
+            self.transient(parent)
+            self.result = None
+            self.vars: dict = {}
+            outer = ttk.Frame(self, padding=10)
+            outer.pack(fill="both", expand=True)
+            nb = ttk.Notebook(outer)
+            nb.pack(fill="both", expand=True)
+            pages: dict = {}
+            rows: dict = {}
+            for tab in self.TABS:
+                page = ttk.Frame(nb, padding=10)
+                page.columnconfigure(1, weight=1)
+                nb.add(page, text=tab)
+                pages[tab], rows[tab] = page, 0
+                if tab in self.TAB_HELP:
+                    ttk.Label(
+                        page, text=self.TAB_HELP[tab], justify="left", wraplength=520
+                    ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
+                    rows[tab] = 1
+            for spec in self.FIELDS:
+                key, label, kind, tab = spec[:4]
+                body, row = pages[tab], rows[tab]
+                rows[tab] = row + 1
+                ttk.Label(body, text=label).grid(
+                    row=row, column=0, sticky="w", pady=2, padx=(0, 8)
+                )
+                value = defaults.get(key)
+                if isinstance(value, list):
+                    value = " ".join(str(v) for v in value)
+                var = tk.StringVar(value="" if value is None else str(value))
+                self.vars[key] = var
+                if kind == "combo":
+                    ttk.Combobox(
+                        body,
+                        textvariable=var,
+                        values=spec[4],
+                        state="readonly",
+                        width=14,
+                    ).grid(row=row, column=1, sticky="w", pady=2)
+                else:
+                    ttk.Entry(body, textvariable=var, width=46).grid(
+                        row=row, column=1, sticky="ew", pady=2
+                    )
+                    if kind == "file":
+                        ttk.Button(
+                            body,
+                            text="...",
+                            width=3,
+                            command=lambda v=var: self._browse(v),
+                        ).grid(row=row, column=2, padx=(4, 0))
+            buttons = ttk.Frame(outer)
+            buttons.pack(fill="x", pady=(10, 0))
+            ttk.Label(buttons, text="Empty fields use the built-in default.").pack(
+                side="left"
+            )
+            ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
+            ttk.Button(buttons, text="OK", command=self._ok).pack(side="right", padx=4)
+            self.bind("<Escape>", lambda e: self.destroy())
+            self.bind("<Control-Return>", lambda e: self._ok())
+            self.minsize(560, 320)
+            self.update_idletasks()
+            self.geometry(f"+{parent.winfo_rootx() + 40}+{parent.winfo_rooty() + 40}")
+            self.grab_set()
+            self.wait_window(self)
+
+        def _browse(self, var):
+            path = filedialog.askopenfilename(
+                parent=self, title="Choose program or file"
+            )
+            if path:
+                var.set(path.replace("\\", "/"))
+
+        def _ok(self):
+            self.result = {k: v.get().strip() for k, v in self.vars.items()}
+            self.destroy()
+
+    def ask_choice(parent, title: str, text: str, choices: list[tuple[str, str]]):
+        """A small dialog with one button per (key, label); returns the key."""
+        dlg = tk.Toplevel(parent)
+        dlg.title(title)
+        dlg.transient(parent)
+        picked = []
+        ttk.Label(dlg, text=text, justify="left", wraplength=440, padding=12).pack()
+        row = ttk.Frame(dlg, padding=(12, 0, 12, 12))
+        row.pack(fill="x")
+        for key, label in choices:
+            ttk.Button(
+                row, text=label, command=lambda k=key: (picked.append(k), dlg.destroy())
+            ).pack(side="left", padx=(0, 6))
+        ttk.Button(row, text="Cancel", command=dlg.destroy).pack(side="right")
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.update_idletasks()
+        dlg.geometry(f"+{parent.winfo_rootx() + 60}+{parent.winfo_rooty() + 80}")
+        dlg.grab_set()
+        parent.wait_window(dlg)
+        return picked[0] if picked else None
 
     class App(tk.Tk):
         ROOT_LABEL = "(top level)"
@@ -1582,29 +1949,112 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
         # -- menu & keys ---------------------------------------------------
 
         def _build_menu(self):
+            # Context menus are built per click (session / folder / empty
+            # space), so every entry shown is one that applies; see
+            # build_context_menu().
+            self.bind("<Control-q>", lambda e: self.quit_app())
+            button = "<Button-2>" if IS_MAC else "<Button-3>"
+            self.tree.bind(button, self.popup_menu)
+            if IS_MAC:
+                self.tree.bind("<Control-Button-1>", self.popup_menu)
+
+        def build_context_menu(self, kind: str) -> tk.Menu:
+            """`kind` is 'session', 'folder' or 'background'."""
             m = tk.Menu(self, tearoff=0)
-            self.menu = m
-            m.add_command(
-                label="New Session", command=self.new_session, accelerator="Ctrl+N"
-            )
-            m.add_command(
-                label="Launch Session",
-                command=self.launch_selected,
-                accelerator="Enter",
-            )
-            m.add_command(
-                label="Launch Folder", command=lambda: self.launch_folder(False)
-            )
-            m.add_command(
-                label="Launch Folder and Subfolders",
-                command=lambda: self.launch_folder(True),
-            )
-            m.add_command(
-                label="Launch WinSCP",
-                command=self.launch_winscp_selected,
-                accelerator="Ctrl+W",
-            )
+            locked = bool(self.locked_var.get())
+            if kind == "session":
+                m.add_command(
+                    label="Launch Session",
+                    command=self.launch_selected,
+                    accelerator="Enter",
+                )
+                label = self.transfer_label()
+                if label:
+                    m.add_command(
+                        label=label,
+                        command=self.launch_transfer_selected,
+                        accelerator="Ctrl+W",
+                    )
+                m.add_command(
+                    label="Copy SSH Command",
+                    command=self.copy_command,
+                    accelerator="Ctrl+C",
+                )
+                if not locked:
+                    m.add_separator()
+                    m.add_command(
+                        label="Edit Session...",
+                        command=self.edit_session,
+                        accelerator="Ctrl+E",
+                    )
+                    m.add_command(
+                        label="Duplicate Session...", command=self.duplicate_session
+                    )
+                    m.add_command(
+                        label="Move To Folder...", command=self.move_to_folder
+                    )
+                    m.add_command(
+                        label="Delete Session",
+                        command=self.delete_node,
+                        accelerator="Del",
+                    )
+                    m.add_separator()
+                    m.add_command(
+                        label="New Session Here...",
+                        command=self.new_session,
+                        accelerator="Ctrl+N",
+                    )
+            elif kind == "folder":
+                m.add_command(
+                    label="Launch All Sessions",
+                    command=lambda: self.launch_folder(False),
+                )
+                m.add_command(
+                    label="Launch All Including Subfolders",
+                    command=lambda: self.launch_folder(True),
+                )
+                if not locked:
+                    m.add_separator()
+                    m.add_command(
+                        label="New Session Here...",
+                        command=self.new_session,
+                        accelerator="Ctrl+N",
+                    )
+                    m.add_command(label="New Subfolder...", command=self.new_folder)
+                    m.add_separator()
+                    m.add_command(
+                        label="Rename Folder...",
+                        command=self.rename_folder,
+                        accelerator="F2",
+                    )
+                    m.add_command(
+                        label="Move Folder To...", command=self.move_to_folder
+                    )
+                    m.add_command(
+                        label="Delete Folder",
+                        command=self.delete_node,
+                        accelerator="Del",
+                    )
+            else:
+                if not locked:
+                    m.add_command(
+                        label="New Session...",
+                        command=self.new_session,
+                        accelerator="Ctrl+N",
+                    )
+                    m.add_command(label="New Folder...", command=self.new_folder)
+                    m.add_separator()
+                self._add_app_items(m)
+                return m
             m.add_separator()
+            app_menu = tk.Menu(m, tearoff=0)
+            self._add_app_items(app_menu)
+            m.add_cascade(label=APP_NAME, menu=app_menu)
+            return m
+
+        def _add_app_items(self, m: tk.Menu):
+            """Tree-wide and application items: shown flat on empty space and
+            as a submenu on sessions and folders."""
             m.add_command(
                 label="Refresh Sessions", command=self.refresh, accelerator="F5"
             )
@@ -1631,52 +2081,28 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
                     command=self.on_sort_change,
                 )
             m.add_cascade(label="Sort By", menu=sort)
-            m.add_separator()
             m.add_checkbutton(
                 label="Lock Session Tree",
                 variable=self.locked_var,
                 command=self.on_lock_change,
             )
-            mgmt = tk.Menu(m, tearoff=0)
-            self.mgmt_menu = mgmt
-            mgmt.add_command(
-                label="Edit Session...", command=self.edit_session, accelerator="Ctrl+E"
-            )
-            mgmt.add_command(label="Duplicate Session", command=self.duplicate_session)
-            mgmt.add_command(
-                label="Copy SSH Command",
-                command=self.copy_command,
-                accelerator="Ctrl+C",
-            )
-            mgmt.add_command(label="Move To Folder...", command=self.move_to_folder)
-            mgmt.add_command(
-                label="Delete Session", command=self.delete_node, accelerator="Del"
-            )
-            mgmt.add_separator()
-            mgmt.add_command(label="New Folder...", command=self.new_folder)
-            mgmt.add_command(
-                label="Rename Folder...", command=self.rename_folder, accelerator="F2"
-            )
-            mgmt.add_command(label="Delete Folder", command=self.delete_node)
-            mgmt.add_separator()
-            mgmt.add_command(
+            m.add_separator()
+            m.add_command(label="Settings...", command=self.open_settings)
+            if IS_WINDOWS and not self.locked_var.get():
+                m.add_command(
+                    label="Import PuTTY Sessions...", command=self.import_putty
+                )
+            m.add_command(
                 label="Edit Config File",
                 command=lambda: open_with_default_app(self.cfg.path),
             )
-            mgmt.add_command(
+            m.add_command(
                 label="Open Config Folder",
                 command=lambda: open_with_default_app(self.cfg.path.parent),
             )
-            mgmt.add_command(label="About", command=self.about)
-            m.add_cascade(label="Session Management", menu=mgmt)
             m.add_separator()
+            m.add_command(label="About", command=self.about)
             m.add_command(label="Exit", command=self.quit_app, accelerator="Ctrl+Q")
-            self.bind("<Control-q>", lambda e: self.quit_app())
-
-            button = "<Button-2>" if IS_MAC else "<Button-3>"
-            self.tree.bind(button, self.popup_menu)
-            if IS_MAC:
-                self.tree.bind("<Control-Button-1>", self.popup_menu)
 
         def _bind_keys(self):
             t = self.tree
@@ -1694,7 +2120,7 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
             self.bind("<Control-Left>", lambda e: self.set_all_open(False))
             self.bind("<Control-n>", lambda e: self.new_session())
             self.bind("<Control-e>", lambda e: self.edit_session())
-            self.bind("<Control-w>", lambda e: self.launch_winscp_selected())
+            self.bind("<Control-w>", lambda e: self.launch_transfer_selected())
             self.bind("<Control-f>", lambda e: self.show_filter())
             self.filter_entry.bind("<Return>", lambda e: self.focus_first_session())
             self.filter_entry.bind("<Down>", lambda e: self.focus_first_session())
@@ -1990,45 +2416,23 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
             if iid:
                 self.tree.selection_set(iid)
                 self.tree.focus(iid)
+                kind = "folder" if iid in self.folder_iids else "session"
             else:
                 self.tree.selection_remove(*self.tree.selection())
-            self._refresh_menu_state()
+                kind = "background"
+            menu = self.build_context_menu(kind)
             try:
-                self.menu.tk_popup(event.x_root, event.y_root)
+                menu.tk_popup(event.x_root, event.y_root)
             finally:
-                self.menu.grab_release()
+                menu.grab_release()
             return "break"
-
-        def _refresh_menu_state(self):
-            iid = self.selected_iid()
-            is_sess = bool(iid) and iid not in self.folder_iids
-            is_fold = bool(iid) and iid in self.folder_iids
-            locked = self.locked_var.get()
-            m, g = self.menu, self.mgmt_menu
-
-            def st(cond):
-                return "normal" if cond else "disabled"
-
-            m.entryconfig("Launch Session", state=st(is_sess))
-            m.entryconfig("Launch Folder", state=st(is_fold))
-            m.entryconfig("Launch Folder and Subfolders", state=st(is_fold))
-            m.entryconfig("Launch WinSCP", state=st(is_sess and IS_WINDOWS))
-            m.entryconfig("New Session", state=st(not locked))
-            g.entryconfig("Edit Session...", state=st(is_sess and not locked))
-            g.entryconfig("Duplicate Session", state=st(is_sess and not locked))
-            g.entryconfig("Copy SSH Command", state=st(is_sess))
-            g.entryconfig("Move To Folder...", state=st(bool(iid) and not locked))
-            g.entryconfig("Delete Session", state=st(is_sess and not locked))
-            g.entryconfig("New Folder...", state=st(not locked))
-            g.entryconfig("Rename Folder...", state=st(is_fold and not locked))
-            g.entryconfig("Delete Folder", state=st(is_fold and not locked))
 
         def on_select(self, _event=None):
             iid = self.selected_iid()
             if not iid or iid in self.folder_iids:
                 return
             try:
-                cmd = build_ssh_command(self.settings_for(iid))
+                cmd = build_session_command(self.settings_for(iid))
                 self.set_status(cmdline_string(cmd))
             except Exception as exc:  # noqa: BLE001
                 self.set_status(f"error: {exc}")
@@ -2158,24 +2562,30 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
                 if recursive and child in self.folder_iids:
                     yield from self._descendants(child, True)
 
-        def launch_winscp_selected(self):
+        def launch_transfer_selected(self):
             iid = self.selected_iid()
             if not iid or iid in self.folder_iids:
                 return
             try:
-                argv = launch_winscp(self.settings_for(iid))
+                argv = launch_file_transfer(self.settings_for(iid))
                 self.set_status("Launched: " + cmdline_string(argv))
             except Exception as exc:  # noqa: BLE001
                 messagebox.showerror(
-                    APP_NAME, f"Could not launch WinSCP:\n{exc}", parent=self
+                    APP_NAME,
+                    f"Could not open the file transfer app:\n{exc}",
+                    parent=self,
                 )
+
+        def transfer_label(self) -> str | None:
+            """Menu label for the file transfer item, None when disabled."""
+            return TRANSFER_LABELS.get(transfer_app_of(self.cfg.defaults))
 
         def copy_command(self):
             iid = self.selected_iid()
             if not iid or iid in self.folder_iids:
                 return
             try:
-                line = cmdline_string(build_ssh_command(self.settings_for(iid)))
+                line = cmdline_string(build_session_command(self.settings_for(iid)))
             except Exception as exc:  # noqa: BLE001
                 messagebox.showerror(APP_NAME, str(exc), parent=self)
                 return
@@ -2375,6 +2785,62 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
             self.rebuild(capture=False)
             self.select_path(new_path)
 
+        def open_settings(self):
+            dlg = SettingsDialog(self, self.cfg.defaults)
+            if dlg.result is None:
+                return
+            changed = apply_settings(self.cfg.defaults, dlg.result)
+            if not changed:
+                self.set_status("Settings unchanged")
+                return
+            self.cfg.save()
+            self.close_action = str(
+                self.cfg.defaults.get("close_action") or "exit"
+            ).lower()
+            self.rebuild()
+            note = " (font changes apply after a restart)" if "font" in changed else ""
+            self.set_status("Settings saved: " + ", ".join(changed) + note)
+
+        def import_putty(self):
+            if self.locked():
+                return
+            try:
+                import import_putty_registry as imp
+
+                sessions = imp.read_registry_sessions()
+            except Exception as exc:  # noqa: BLE001
+                messagebox.showerror(
+                    APP_NAME, f"Could not read PuTTY sessions:\n{exc}", parent=self
+                )
+                return
+            tree, derived, notes = imp.build_tree(sessions)
+            count = sum(1 for _ in walk_sessions(tree, []))
+            if not count:
+                messagebox.showinfo(
+                    APP_NAME, "No PuTTY sessions found in the registry.", parent=self
+                )
+                return
+            mode = ask_choice(
+                self,
+                "Import PuTTY Sessions",
+                f"{count} PuTTY sessions found (folders from PuTTY Session Manager "
+                "are kept).\n\nAdd only the sessions that are missing here, or "
+                "replace the whole tree? A backup of the config file is kept when "
+                "replacing.",
+                [("merge", "Add missing"), ("replace", "Replace all")],
+            )
+            if not mode:
+                return
+            added = apply_putty_import(self.cfg, tree, derived, mode)
+            self.cfg.save()
+            self.rebuild()
+            self.set_status(f"Imported {added} PuTTY session(s) ({mode})")
+            if notes:
+                shown = "\n".join(notes[:12]) + ("\n..." if len(notes) > 12 else "")
+                messagebox.showinfo(
+                    APP_NAME, "Some sessions need attention:\n\n" + shown, parent=self
+                )
+
         def about(self):
             try:
                 preset, template = resolve_terminal(
@@ -2384,15 +2850,23 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
                 terminal = f"{preset} ({template[0]})"
             except Exception as exc:  # noqa: BLE001
                 terminal = f"error: {exc}"
-            winscp = (
-                find_winscp(self.cfg.defaults.get("winscp_path"))
-                if IS_WINDOWS
-                else "n/a"
-            )
+            d = self.cfg.defaults
+            ssh_app = ssh_app_of(d)
+            if ssh_app == "putty":
+                ssh_info = f"PuTTY ({find_putty(d.get('putty_path')) or 'not found'})"
+            else:
+                ssh_info = f"OpenSSH ({resolve_ssh_path(d.get('ssh_path'))})"
+            transfer = transfer_app_of(d)
+            finders = {
+                "winscp": lambda: find_winscp(d.get("winscp_path")),
+                "filezilla": lambda: find_filezilla(d.get("filezilla_path")),
+            }
+            found = finders[transfer]() if transfer in finders else transfer
+            winscp = f"{transfer}: {found or 'not found'}"
             messagebox.showinfo(
                 APP_NAME,
                 f"{APP_NAME} {__version__}\n\nConfig: {self.cfg.path}\nState: {self.state_path}\n"
-                f"Terminal: {terminal}\nWinSCP: {winscp or 'not found'}\n"
+                f"SSH: {ssh_info}\nTerminal: {terminal}\nFile transfer: {winscp}\n"
                 f"Close button: {self.close_action}\n"
                 f"Python: {sys.executable}\n\n"
                 "Right-click for the session menu. Drag sessions between folders.",
@@ -2410,6 +2884,25 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
     if on_ready:
         app.after(100, lambda: on_ready(app))
     app.mainloop()
+
+
+def apply_putty_import(cfg: Config, tree: list, derived: dict, mode: str) -> int:
+    """Put an imported PuTTY tree into the config.  mode 'replace' swaps the
+    whole tree (keeping a .bak of the file), 'merge' adds what is missing.
+    Returns the number of sessions added."""
+    import import_putty_registry as imp
+
+    for key, value in derived.items():
+        cfg.defaults.setdefault(key, value)
+    if mode == "replace":
+        if cfg.path.exists():
+            import datetime
+
+            stamp = f"{datetime.datetime.now():%Y%m%d-%H%M%S}"
+            shutil.copy2(cfg.path, cfg.path.with_name(f"{cfg.path.name}.bak-{stamp}"))
+        cfg.data["tree"] = tree
+        return sum(1 for _ in walk_sessions(tree, []))
+    return imp.merge_trees(cfg.tree, tree)
 
 
 def open_with_default_app(path: Path) -> None:
@@ -2455,7 +2948,10 @@ def main(argv=None) -> int:
         "--launch", metavar="SESSION", help="open SESSION in a terminal and exit"
     )
     group.add_argument(
-        "--winscp", metavar="SESSION", help="open SESSION in WinSCP and exit"
+        "--winscp",
+        "--transfer",
+        metavar="SESSION",
+        help="open SESSION in the file transfer app (WinSCP, FileZilla, ...) and exit",
     )
     group.add_argument(
         "--write-example", metavar="FILE", help="write the example config to FILE"
@@ -2522,11 +3018,11 @@ def main(argv=None) -> int:
         s = effective_settings(cfg, session, folders)
         try:
             if args.print:
-                print(cmdline_string(build_ssh_command(s)))
+                print(cmdline_string(build_session_command(s)))
             elif args.launch:
                 print(cmdline_string(launch_session(s)))
             else:
-                print(cmdline_string(launch_winscp(s)))
+                print(cmdline_string(launch_file_transfer(s)))
         except Exception as exc:  # noqa: BLE001
             print(f"error: {exc}", file=sys.stderr)
             return 1

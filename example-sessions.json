@@ -12,6 +12,8 @@
     "ssh_path": "auto",
     "winscp_path": "auto",
     "winscp_protocol": "sftp",
+    "ssh_app": "openssh",
+    "scp_app": "winscp",
     "close_action": "exit"
   },
   "tree": [

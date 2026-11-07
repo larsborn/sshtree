@@ -50,10 +50,21 @@ On first start an example config is written to
   <img src="docs/screenshots/filter.png" alt="Filtering the tree" width="380">
 </p>
 
-Right-click gives the session menu: New Session, Launch Session, Launch Folder
-(and Subfolders), Launch WinSCP, Refresh, Expand and Collapse, Sort By, Lock
-Session Tree and Session Management (edit, duplicate, copy ssh command, move,
-delete, folders, open the config file).
+The right-click menu depends on what you click. On a **session**: launch,
+open in WinSCP or FileZilla, copy the ssh command, edit, duplicate, move,
+delete, new session here. On a **folder**: launch all sessions (optionally
+including subfolders), new session or subfolder here, rename, move, delete.
+On **empty space**: new session or folder, plus the application items:
+refresh, expand and collapse, sort, lock the tree, Settings, Import PuTTY
+Sessions (Windows), open the config file or folder, About, Exit. Sessions and
+folders carry those application items in an "SSH Tree" submenu. With the tree
+locked, editing entries disappear instead of being greyed out.
+
+**Settings** (from the menu) holds the machine-specific defaults: which SSH
+application opens sessions (OpenSSH in a terminal, or PuTTY), the ssh, putty,
+terminal, WinSCP and FileZilla executables (all auto-detected when empty), the
+file transfer application, the hold-on-exit mode, the close button behaviour
+and the tree font. Everything there is also plain keys in `defaults`.
 
 Sessions can be dragged between folders. The status bar shows the exact ssh
 command of the selected session. Just start typing (or press Ctrl+F) to open
@@ -149,6 +160,11 @@ example.
 | `terminal` | `auto`, a preset name, or a custom template list (below). |
 | `terminal_path` | `auto` or the terminal executable to use for the preset, e.g. a portable `WindowsTerminal.exe`. |
 | `ssh_path` | The ssh executable. `auto` (default) uses the built-in Windows OpenSSH when present; `ssh` takes whatever is first on the PATH; or a full path. |
+| `ssh_app` | `openssh` (default): ssh inside the terminal. `putty`: PuTTY in its own window with the same user, port, key (`.ppk` preferred), tunnels, `-A`, `-X`, `-N`; a `jump_host` becomes a plink proxy command; `options` and `command` do not apply. |
+| `putty_path` | `auto` or the path to `putty.exe`. |
+| `scp_app` | File transfer application for "Open in ...": `winscp` (default on Windows), `filezilla`, `custom` or `none`. |
+| `scp_command` | For `scp_app: custom`: command template with `{host}` `{user}` `{port}` `{key}` `{url}` `{userhost}`, e.g. `"C:/Tools/MyScp.exe {url}"`. |
+| `filezilla_path` | `auto` or the path to the FileZilla executable. |
 | `winscp_path` | `auto` or the full path to `WinSCP.exe`. |
 | `winscp_protocol` | `sftp` (default) or `scp`. |
 | `winscp_key` | Key file for WinSCP (`.ppk`). See WinSCP below. |
@@ -211,13 +227,18 @@ Windows that is the OpenSSH agent service or Pageant 0.78+ started with
 OpenSSH (which `ssh_path: auto` prefers) can use such an agent; Git's MSYS
 ssh cannot.
 
-### WinSCP (Windows)
+### File transfer: WinSCP, FileZilla or your own tool
 
-*Launch WinSCP* opens `sftp://user@host:port/` in WinSCP. The key is chosen in
-this order: `winscp_key`, a `.ppk` next to `identity_file`, then
+*Open in WinSCP* (Ctrl+W) opens `sftp://user@host:port/` in WinSCP. The key is
+chosen in this order: `winscp_key`, a `.ppk` next to `identity_file`, then
 `identity_file` itself (WinSCP offers to convert OpenSSH keys). With no key
 WinSCP falls back to Pageant or asks for a password, which is never stored. A
 `jump_host` becomes a WinSCP tunnel.
+
+With `scp_app: filezilla` the same entry reads *Open in FileZilla* and passes
+`sftp://user@host:port`; FileZilla then uses its own key settings or the agent.
+`scp_app: custom` runs `scp_command` with the placeholders filled in, and
+`none` removes the entry from the menu.
 
 ## Launching with a hotkey
 
@@ -251,7 +272,7 @@ to the front and exits (a localhost socket; port and token in
 sshtree-cli --list                  # list sessions and exit
 sshtree-cli --print NAME            # show the ssh command for a session
 sshtree-cli --launch NAME           # open the session in a terminal
-sshtree-cli --winscp NAME           # open the session in WinSCP (Windows)
+sshtree-cli --transfer NAME         # open the session in WinSCP / FileZilla
 sshtree-cli --config FILE ...       # use another config file
 sshtree-cli --write-example FILE    # write the example config
 sshtree-cli --import-putty [...]    # import PuTTY sessions (see below)
@@ -263,9 +284,12 @@ From source, replace `sshtree-cli` with `python sshtree.py`.
 
 ## Importing PuTTY sessions
 
-`import_putty_registry.py` (or `sshtree-cli --import-putty`) reads the PuTTY
-sessions from the registry, including the folders that PuTTY Session Manager
-stores in each session's `PsmPath` value, and writes them into the config:
+*Import PuTTY Sessions* in the menu (right-click on empty space, Windows)
+reads the PuTTY sessions from the registry, including the folders that PuTTY
+Session Manager stores in each session's `PsmPath` value, and either adds the
+missing ones or replaces the tree (keeping a backup of the config file). The
+same importer is available on the command line as `import_putty_registry.py`
+or `sshtree-cli --import-putty`:
 
 ```
 python import_putty_registry.py --dry-run     # show the result only

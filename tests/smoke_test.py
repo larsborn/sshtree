@@ -355,6 +355,109 @@ def test_builders(tmp: Path):
     else:
         raise SystemExit("FAIL: missing winscp accepted")
 
+    # SSH application choice: PuTTY command from the same session settings
+    fake_putty = tmp / "putty.exe"
+    fake_putty.write_bytes(b"")
+    s = {
+        "name": "p",
+        "host": "h",
+        "user": "u",
+        "port": 2200,
+        "identity_file": str(tmp / "key"),
+        "agent_forwarding": True,
+        "no_shell": True,
+        "tunnels": ["L 8080 localhost:80", "D 1080"],
+        "jump_host": "j@gw",
+        "extra_args": "-pw-file x",
+        "ssh_app": "putty",
+        "putty_path": str(fake_putty),
+    }
+    cmd = sshtree.build_putty_command(s)
+    check(
+        cmd
+        == [
+            str(fake_putty),
+            "-ssh",
+            "-l",
+            "u",
+            "-P",
+            "2200",
+            "-i",
+            str(ppk),
+            "-A",
+            "-N",
+            "-L",
+            "8080:localhost:80",
+            "-D",
+            "1080",
+            "-proxycmd",
+            "plink -batch -nc %host:%port j@gw",
+            "-pw-file",
+            "x",
+            "h",
+        ],
+        f"putty command: {cmd}",
+    )
+    check(
+        sshtree.build_session_command(s)[0] == str(fake_putty),
+        "session command dispatches to putty",
+    )
+    check(
+        sshtree.build_session_command({"host": "h"})[0]
+        == sshtree.resolve_ssh_path(None),
+        "session command default is OpenSSH",
+    )
+    check(
+        sshtree.ssh_app_of({"ssh_app": "nonsense"}) == "openssh",
+        "unknown ssh_app falls back to openssh",
+    )
+
+    # file transfer application choice
+    fake_fz = tmp / "filezilla.exe"
+    fake_fz.write_bytes(b"")
+    s = {
+        "host": "h",
+        "user": "u",
+        "port": 2200,
+        "scp_app": "filezilla",
+        "filezilla_path": str(fake_fz),
+    }
+    check(
+        sshtree.build_file_transfer_command(s) == [str(fake_fz), "sftp://u@h:2200"],
+        "filezilla command",
+    )
+    s = {
+        "host": "h",
+        "user": "u",
+        "scp_app": "custom",
+        "scp_command": "C:/Tools/x.exe {url} --user {user} --key {key}",
+        "identity_file": "~/.ssh/k",
+    }
+    check(
+        sshtree.build_file_transfer_command(s)
+        == [
+            "C:/Tools/x.exe",
+            "sftp://u@h:22/",
+            "--user",
+            "u",
+            "--key",
+            sshtree.expand_path("~/.ssh/k"),
+        ],
+        "custom transfer command with placeholders",
+    )
+    for bad in ({"host": "h", "scp_app": "none"}, {"host": "h", "scp_app": "custom"}):
+        try:
+            sshtree.build_file_transfer_command(bad)
+        except ValueError:
+            pass
+        else:
+            raise SystemExit(f"FAIL: transfer command accepted for {bad}")
+    print("ok   transfer: 'none' and empty custom command rejected")
+    check(
+        sshtree.transfer_app_of({"scp_app": "FileZilla"}) == "filezilla",
+        "transfer app name normalised",
+    )
+
     # config find + folder defaults
     cfg = sshtree.Config(tmp / "sessions.json")
     cfg.load()
@@ -465,6 +568,31 @@ def test_importer(tmp: Path):
         f"gamma: {gamma}",
     )
     check(len(notes) == 1 and notes[0].startswith("gamma:"), f"notes: {notes}")
+    # the GUI import applies the same tree to a config: merge, then replace + backup
+    cfg = sshtree.Config(tmp / "import-target.json")
+    cfg.load()
+    before = len(list(sshtree.walk_sessions(cfg.tree, [])))
+    added = sshtree.apply_putty_import(
+        cfg, json.loads(json.dumps(tree)), derived, "merge"
+    )
+    cfg.save()
+    check(
+        added == 3
+        and len(list(sshtree.walk_sessions(cfg.tree, []))) == before + 3
+        and cfg.defaults.get("agent_forwarding") is True,
+        f"GUI import merge: added={added}",
+    )
+    replaced = sshtree.apply_putty_import(
+        cfg, json.loads(json.dumps(tree)), derived, "replace"
+    )
+    backups = list(tmp.glob("import-target.json.bak-*"))
+    check(
+        replaced == 3
+        and [n["name"] for n in cfg.tree] == ["Lab", "gamma"]
+        and len(backups) == 1,
+        f"GUI import replace with backup: {replaced} {backups}",
+    )
+
     existing = [
         {"name": "Lab", "children": [{"name": "beta", "host": "old"}]},
         {"name": "mine", "host": "m"},
@@ -620,6 +748,38 @@ def test_gui(tmp: Path):
             results["shown_state"] = app.state()
             app.close_action = saved_action
 
+            # context menus: built per target, no disabled entries anywhere
+            def labels(menu):
+                out = []
+                end = menu.index("end")
+                for i in range(0 if end is None else end + 1):
+                    if menu.type(i) in ("command", "cascade", "checkbutton"):
+                        out.append(menu.entrycget(i, "label"))
+                        if menu.entrycget(i, "state") == "disabled":
+                            out.append("<DISABLED>")
+                return out
+
+            menus = {
+                kind: labels(app.build_context_menu(kind))
+                for kind in ("session", "folder", "background")
+            }
+            app.locked_var.set(True)
+            menus["session_locked"] = labels(app.build_context_menu("session"))
+            app.locked_var.set(False)
+            results["menus"] = menus
+
+            # settings: the dialog's result is applied to the defaults
+            defaults = dict(app.cfg.defaults)
+            changed = sshtree.apply_settings(
+                defaults, {"ssh_app": "putty", "user": "", "font": "Tahoma 8"}
+            )
+            results["settings"] = (
+                sorted(changed),
+                defaults.get("ssh_app"),
+                "user" in defaults,
+                defaults.get("font"),
+            )
+
             # scrollbar auto-hides: few rows -> hidden, many rows -> shown
             app.geometry("360x600")
             app.set_all_open(True)
@@ -712,6 +872,45 @@ def test_gui(tmp: Path):
         f"hide/show window: {results['hidden_state']} -> {results['shown_state']}",
     )
     check(not (tmp / "instance.json").exists(), "instance.json removed on exit")
+    m = results["menus"]
+    check(
+        all("<DISABLED>" not in v for v in m.values()),
+        f"no disabled context menu entries: {m}",
+    )
+    check(
+        m["session"][:1] == ["Launch Session"]
+        and "Edit Session..." in m["session"]
+        and "Delete Session" in m["session"]
+        and "Rename Folder..." not in m["session"]
+        and m["session"][-1] == sshtree.APP_NAME,
+        f"session menu: {m['session']}",
+    )
+    check(
+        m["folder"][:2] == ["Launch All Sessions", "Launch All Including Subfolders"]
+        and "New Subfolder..." in m["folder"]
+        and "Rename Folder..." in m["folder"]
+        and "Launch Session" not in m["folder"]
+        and "Edit Session..." not in m["folder"],
+        f"folder menu: {m['folder']}",
+    )
+    check(
+        m["background"][:2] == ["New Session...", "New Folder..."]
+        and "Settings..." in m["background"]
+        and "About" in m["background"]
+        and "Exit" in m["background"]
+        and "Launch Session" not in m["background"],
+        f"background menu: {m['background']}",
+    )
+    check(
+        "Edit Session..." not in m["session_locked"]
+        and "Launch Session" in m["session_locked"],
+        f"locked session menu hides editing: {m['session_locked']}",
+    )
+    check(
+        results["settings"]
+        == (["font", "ssh_app", "user"], "putty", False, "Tahoma 8"),
+        f"settings applied: {results['settings']}",
+    )
     check(
         results["vsb_tall"] is False
         and results["vsb_small"] is True
