@@ -94,6 +94,7 @@ re-read automatically when it changes on disk.
 | Ctrl+F, or just typing | Open the filter bar (Ctrl+F selects an existing filter, so typing replaces it) |
 | Enter or Down in the filter | Select the first match; Enter again launches it |
 | Esc | Clear the filter, then hide the bar, then close the window |
+| Menu key or Shift+F10 | Context menu for the focused row |
 | Ctrl+Q | Exit |
 
 <p align="center">

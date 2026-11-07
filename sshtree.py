@@ -29,7 +29,7 @@ import threading
 from pathlib import Path
 
 APP_NAME = "SSH Tree"
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 FROZEN = bool(getattr(sys, "frozen", False))  # running from a PyInstaller build
 IS_WINDOWS = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
@@ -2214,6 +2214,38 @@ def run_gui(cfg: Config, on_ready=None, start_hidden: bool = False) -> None:
             t.bind("<Control-c>", lambda e: self.copy_command())
             t.bind("<Home>", lambda e: self.select_edge(first=True))
             t.bind("<End>", lambda e: self.select_edge(first=False))
+            # the keyboard's context-menu key ("App" on Windows, "Menu" on X11)
+            # and the universal Shift+F10 open the menu for the focused row
+            for seq in ("<Key-App>", "<Key-Menu>", "<Shift-F10>"):
+                try:
+                    t.bind(seq, self.popup_menu_keyboard)
+                except tk.TclError:
+                    pass
+
+        def popup_menu_keyboard(self, _event=None):
+            """Context menu from the keyboard: below the focused row, or at the
+            top of the tree when nothing is focused (empty-space menu)."""
+            iid = self.tree.focus() or self.selected_iid()
+            if iid and iid not in self.nodes:
+                iid = None
+            if iid:
+                self.tree.selection_set(iid)
+                kind = "folder" if iid in self.folder_iids else "session"
+                bbox = self.tree.bbox(iid)
+                if bbox:
+                    x = self.tree.winfo_rootx() + bbox[0] + min(bbox[2], 80)
+                    y = self.tree.winfo_rooty() + bbox[1] + bbox[3]
+                else:
+                    x, y = self.tree.winfo_rootx() + 40, self.tree.winfo_rooty() + 20
+            else:
+                kind = "background"
+                x, y = self.tree.winfo_rootx() + 40, self.tree.winfo_rooty() + 20
+            menu = self.build_context_menu(kind)
+            try:
+                menu.tk_popup(x, y)
+            finally:
+                menu.grab_release()
+            return "break"
 
         def show_filter(self, initial: str = ""):
             """Open the filter bar (Ctrl+F or typing in the tree) and focus it."""
