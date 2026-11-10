@@ -329,8 +329,10 @@ pyinstaller --noconfirm sshtree.spec    # dist/SshTree/ with both executables
 
 Releases are built by GitHub Actions: pushing a tag `vX.Y.Z` (matching
 `__version__` in `sshtree.py`) builds the Windows, Linux and macOS packages
-and attaches them with checksums to a GitHub release. See
-[CHANGELOG.md](CHANGELOG.md).
+and attaches them with checksums to a GitHub release. The release notes are
+the version's section of [CHANGELOG.md](CHANGELOG.md), so every release needs
+one; `python tools/changelog_section.py X.Y.Z` prints what will be published
+and the build fails if the section is missing.
 
 ## License
 

@@ -95,6 +95,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           path: packages
@@ -102,8 +103,13 @@ jobs:
       - name: Checksums
         run: |
           cd packages && sha256sum SshTree-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Release notes from CHANGELOG.md
+        run: |
+          python tools/changelog_section.py "${{ github.ref_name }}" > notes.md
+          cat notes.md
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: packages/*
+          body_path: notes.md
           generate_release_notes: true
